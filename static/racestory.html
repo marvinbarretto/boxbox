@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>F1 Race Story</title>
+<style>
+  :root {
+    --bg:#0a0a0f; --panel:#15151f; --line:#2a2a3a; --red:#e10600;
+    --text:#f2f2f7; --muted:#8a8a9a; --accent:#00d2be;
+    /* F1 tyre compound colours — used for the stint bars + legend. */
+    --c-soft:#e10600; --c-medium:#f2d544; --c-hard:#e8e8ee;
+    --c-intermediate:#3fc34a; --c-wet:#2f8fff; --c-unknown:#555;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { padding:18px 28px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:14px; }
+  header .bar { width:6px; height:28px; background:var(--red); border-radius:2px; }
+  header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  header .links { margin-left:auto; display:flex; gap:18px; }
+  header a { color:var(--muted); text-decoration:none; font-size:13px; }
+  header a:hover { color:var(--text); }
+  main { max-width:1100px; margin:0 auto; padding:20px; }
+
+  form { display:flex; gap:12px; align-items:end; flex-wrap:wrap;
+         background:var(--panel); border:1px solid var(--line); padding:14px; border-radius:12px; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.6px;
+          color:var(--muted); margin-bottom:5px; }
+  input, select { background:#0d0d14; border:1px solid var(--line); color:var(--text);
+                  padding:8px 10px; border-radius:8px; font-size:14px; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); }
+  input#event { width:140px; } input#year { width:80px; }
+  button { background:var(--red); color:#fff; border:0; padding:9px 18px; border-radius:8px;
+           font-weight:600; cursor:pointer; font-size:14px; }
+  button:disabled { opacity:.5; cursor:default; }
+
+  #status { color:var(--muted); margin:16px 2px; min-height:20px; font-size:14px; }
+  #stage { display:none; }
+  #stage.show { display:block; }
+
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+            padding:16px 18px; margin-top:16px; }
+  section h2 { font-size:13px; text-transform:uppercase; letter-spacing:.7px;
+               color:var(--muted); margin:0 0 12px; font-weight:600; }
+
+  /* Charts are hand-rolled SVG (stints/events) + a canvas (positions). No libs. */
+  .canvas-wrap { background:#08080d; border:1px solid var(--line); border-radius:10px; padding:6px; }
+  canvas { width:100%; display:block; }
+  svg { display:block; width:100%; }
+
+  .legend { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:12px; font-size:11px; }
+  .legend .item { display:flex; align-items:center; gap:5px; color:var(--muted); }
+  .legend .swatch { width:18px; height:3px; border-radius:2px; }
+
+  .tyre-legend { display:flex; flex-wrap:wrap; gap:14px; margin-bottom:10px; font-size:11px; color:var(--muted); }
+  .tyre-legend .item { display:flex; align-items:center; gap:6px; }
+  .tyre-legend .dot { width:12px; height:12px; border-radius:50%; border:1px solid #0006; }
+
+  /* Crosshair tooltip readout for the position chart. */
+  #postip { position:absolute; pointer-events:none; background:#000c; border:1px solid var(--line);
+            padding:6px 9px; border-radius:6px; font-size:12px; display:none; z-index:5; max-width:180px; }
+  #postip .row { display:flex; align-items:center; gap:6px; }
+  #postip .sw { width:8px; height:8px; border-radius:50%; }
+
+  /* Team-radio section: off-lap chip bucket + now-playing transcript readout. */
+  #radiosec svg text, #radiosec svg circle { cursor:pointer; }
+  .radio-pre { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+  .radio-pre .chip { display:flex; align-items:center; gap:5px; cursor:pointer; font-size:11px;
+                     background:#0d0d14; border:1px solid var(--line); border-radius:6px;
+                     padding:3px 7px; color:var(--text); }
+  .radio-pre .chip:hover { border-color:var(--accent); }
+  .radio-pre .chip b { font-weight:700; }
+  .radio-pre .when { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .radio-now { margin-top:12px; padding:11px 13px; background:#0d0d14; border-radius:8px;
+               border-left:3px solid var(--accent); display:none; align-items:flex-start; gap:10px; }
+  .radio-now.show { display:flex; }
+  .radio-now .chip { font-weight:700; font-size:12px; padding:2px 7px; border-radius:5px; color:#fff; flex-shrink:0; }
+  .radio-now .txt { font-size:13.5px; color:#dcdce6; }
+  .radio-now .txt.pending { color:var(--muted); font-style:italic; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar"></div>
+  <h1>F1 RACE STORY</h1>
+  <div class="links">
+    <a href="/">← team radio</a>
+    <a href="/track">track playback</a>
+  </div>
+</header>
+
+<main>
+  <form id="f">
+    <div><label>Year</label><input id="year" type="number" value="2024" /></div>
+    <div><label>Event</label><input id="event" value="Brazil" /></div>
+    <div><label>Session</label>
+      <select id="session"><option>R</option><option>Sprint</option></select>
+    </div>
+    <button type="submit" id="load">Load</button>
+  </form>
+  <div id="status">Tip: first load of a session downloads lap + race-control data (~10s), then it's cached.</div>
+
+  <div id="stage">
+    <!-- POSITION-BY-LAP "spaghetti" chart. Canvas (many polylines = cheap on canvas). -->
+    <section>
+      <h2 id="postitle">Position by lap</h2>
+      <div class="canvas-wrap" style="position:relative;">
+        <canvas id="pos"></canvas>
+        <div id="postip"></div>
+      </div>
+      <div class="legend" id="poslegend"></div>
+    </section>
+
+    <!-- TYRE STINTS — one row per driver, bars coloured by compound, pits marked. -->
+    <section>
+      <h2>Tyre strategy</h2>
+      <div class="tyre-legend">
+        <div class="item"><span class="dot" style="background:var(--c-soft)"></span>Soft</div>
+        <div class="item"><span class="dot" style="background:var(--c-medium)"></span>Medium</div>
+        <div class="item"><span class="dot" style="background:var(--c-hard)"></span>Hard</div>
+        <div class="item"><span class="dot" style="background:var(--c-intermediate)"></span>Inter</div>
+        <div class="item"><span class="dot" style="background:var(--c-wet)"></span>Wet</div>
+        <div class="item">◆ pit stop</div>
+      </div>
+      <svg id="stints"></svg>
+    </section>
+
+    <!-- RACE CONTROL strip — flags / SC / penalties aligned to the lap axis. -->
+    <section>
+      <h2>Race control</h2>
+      <svg id="events"></svg>
+    </section>
+
+    <!-- TEAM RADIO — clips on the lap axis (click to hear + read), plus an
+         "off-lap" bucket for formation / red-flag / cool-down messages. -->
+    <section id="radiosec">
+      <h2 id="radiotitle">Team radio</h2>
+      <div class="radio-pre" id="radioPre"></div>
+      <svg id="radiostrip"></svg>
+      <div class="radio-now" id="radioNow">
+        <span class="chip" id="rn_chip"></span>
+        <div class="txt pending" id="rn_txt"></div>
+      </div>
+      <audio id="r_audio"></audio>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const SVGNS = "http://www.w3.org/2000/svg";
+let data = null;
+
+// Tyre compound -> colour (reads the CSS vars so the legend + bars stay in sync).
+const css = getComputedStyle(document.documentElement);
+function compoundColor(c) {
+  const map = { SOFT:"--c-soft", MEDIUM:"--c-medium", HARD:"--c-hard",
+                INTERMEDIATE:"--c-intermediate", WET:"--c-wet" };
+  return css.getPropertyValue(map[c] || "--c-unknown").trim() || "#555";
+}
+// Event type -> colour + glyph for the race-control strip.
+const EVENT_STYLE = {
+  red:        { color:"#e10600", glyph:"▮", text:"Red flag" },
+  green:      { color:"#3fc34a", glyph:"▮", text:"Green" },
+  chequered:  { color:"#f2f2f7", glyph:"▦", text:"Chequered" },
+  sc:         { color:"#f2d544", glyph:"SC", text:"Safety car" },
+  vsc:        { color:"#f2b544", glyph:"VSC", text:"Virtual SC" },
+  penalty:    { color:"#ff6ad5", glyph:"P", text:"Penalty" },
+  yellow:     { color:"#d8c23a", glyph:"▲", text:"Yellow" },
+};
+
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("load").disabled = true;
+  $("status").textContent = "Loading… (first time fetches lap + race-control data, please wait)";
+  const q = new URLSearchParams({ year:$("year").value, event:$("event").value, session:$("session").value });
+  try {
+    const res = await fetch("/api/racestory?" + q);
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    data = d;
+    $("status").textContent =
+      `${d.total_laps} laps · ${d.positions.length} drivers · ${d.events.length} race-control events · ${d.cached ? "cached" : "freshly built"}`;
+    $("postitle").textContent =
+      `Position by lap — ${d.event.toUpperCase()} ${d.year} ${d.session}`;
+    $("stage").classList.add("show");
+    renderAll();
+    fetchRadio(q);          // radio is non-fatal; render the rest regardless
+  } catch (err) {
+    $("status").textContent = "Error: " + err.message;
+  } finally {
+    $("load").disabled = false;
+  }
+});
+
+function renderAll() { drawPositions(); drawStints(); drawEvents(); drawRadio(); buildRadioPre(); }
+window.addEventListener("resize", () => { if (data) renderAll(); });
+
+// ----- shared lap-axis geometry -----------------------------------------
+// All three charts share the same horizontal lap scale + left gutter so the
+// stint bars and event markers line up vertically with the position chart.
+const PAD_L = 46, PAD_R = 70, PAD_T = 14, PAD_B = 26;
+function lapX(lap, w) {
+  const span = Math.max(1, data.total_laps - 1);
+  return PAD_L + ((lap - 1) / span) * (w - PAD_L - PAD_R);
+}
+
+// ----- 1. POSITION-BY-LAP (canvas) --------------------------------------
+function drawPositions() {
+  const cv = $("pos"), ctx = cv.getContext("2d");
+  const cssW = cv.parentElement.clientWidth - 12; // minus wrap padding
+  const cssH = 460;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = cssW * dpr; cv.height = cssH * dpr;
+  cv.style.height = cssH + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const nDrivers = data.positions.length || 20;
+  // y: position 1 at TOP (inverted), nDrivers at bottom.
+  const posY = pos => PAD_T + ((pos - 1) / Math.max(1, nDrivers - 1)) * (cssH - PAD_T - PAD_B);
+  const xAt = lap => lapX(lap, cssW);
+
+  // gridlines: horizontal per position band, vertical per ~5 laps
+  ctx.strokeStyle = "#1c1c28"; ctx.lineWidth = 1; ctx.font = "10px sans-serif";
+  ctx.fillStyle = "#5a5a6a"; ctx.textBaseline = "middle";
+  for (let p = 1; p <= nDrivers; p++) {
+    const y = posY(p);
+    ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(cssW - PAD_R, y); ctx.stroke();
+    if (p === 1 || p % 5 === 0 || p === nDrivers) {
+      ctx.textAlign = "right"; ctx.fillText("P" + p, PAD_L - 6, y);
+    }
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const lapStep = data.total_laps > 40 ? 10 : 5;
+  for (let l = 1; l <= data.total_laps; l += lapStep) {
+    const x = xAt(l);
+    ctx.strokeStyle = "#15151f"; ctx.beginPath();
+    ctx.moveTo(x, PAD_T); ctx.lineTo(x, cssH - PAD_B); ctx.stroke();
+    ctx.fillStyle = "#5a5a6a"; ctx.fillText("L" + l, x, cssH - PAD_B + 6);
+  }
+
+  // one polyline per driver, in team colour, with the code at the right end.
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  for (const d of data.positions) {
+    if (!d.positions.length) continue;
+    ctx.strokeStyle = d.color; ctx.lineWidth = 2; ctx.globalAlpha = 0.92;
+    ctx.beginPath();
+    d.positions.forEach((p, i) => {
+      const x = xAt(p.lap), y = posY(p.pos);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke();
+    // endpoint label
+    const last = d.positions[d.positions.length - 1];
+    ctx.globalAlpha = 1; ctx.fillStyle = d.color;
+    ctx.font = "600 11px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(d.driver, xAt(last.lap) + 6, posY(last.pos));
+  }
+  ctx.globalAlpha = 1;
+
+  buildPosLegend();
+  attachPosHover(cv, cssW, cssH, posY, xAt, nDrivers);
+}
+
+function buildPosLegend() {
+  const el = $("poslegend"); el.innerHTML = "";
+  for (const d of data.positions) {
+    const item = document.createElement("div"); item.className = "item";
+    const sw = document.createElement("span"); sw.className = "swatch";
+    sw.style.background = d.color;
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(d.driver));
+    el.appendChild(item);
+  }
+}
+
+// Hover: snap to nearest lap, show every driver's position at that lap.
+function attachPosHover(cv, w, h, posY, xAt, nDrivers) {
+  const tip = $("postip");
+  cv.onmousemove = ev => {
+    const rect = cv.getBoundingClientRect();
+    const mx = ev.clientX - rect.left;
+    const span = Math.max(1, data.total_laps - 1);
+    let lap = Math.round(1 + ((mx - PAD_L) / (w - PAD_L - PAD_R)) * span);
+    lap = Math.max(1, Math.min(data.total_laps, lap));
+    // find each driver's position at (or last before) this lap
+    const rows = [];
+    for (const d of data.positions) {
+      let best = null;
+      for (const p of d.positions) { if (p.lap <= lap) best = p; else break; }
+      if (best) rows.push({ driver: d.driver, color: d.color, pos: best.pos });
+    }
+    rows.sort((a, b) => a.pos - b.pos);
+    tip.innerHTML = `<div style="color:var(--muted);margin-bottom:4px">Lap ${lap}</div>` +
+      rows.slice(0, 10).map(r =>
+        `<div class="row"><span class="sw" style="background:${r.color}"></span>P${r.pos} ${r.driver}</div>`).join("");
+    tip.style.display = "block";
+    // keep tooltip inside the wrap
+    const tx = Math.min(mx + 14, w - 170);
+    tip.style.left = Math.max(4, tx) + "px";
+    tip.style.top = "10px";
+  };
+  cv.onmouseleave = () => { $("postip").style.display = "none"; };
+}
+
+// ----- 2. TYRE STINTS (SVG) ---------------------------------------------
+function drawStints() {
+  const svg = $("stints");
+  const w = svg.parentElement.clientWidth;
+  const rowH = 20, gap = 6;
+  const rows = data.stints;
+  const h = PAD_T + rows.length * (rowH + gap) + PAD_B;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("height", h);
+  svg.innerHTML = "";
+
+  rows.forEach((d, i) => {
+    const y = PAD_T + i * (rowH + gap);
+    // driver code in the left gutter
+    add(svg, "text", { x: PAD_L - 8, y: y + rowH / 2 + 4, "text-anchor": "end",
+      fill: d.color, "font-size": 11, "font-weight": 600 }, d.driver);
+    // stint bars
+    for (const st of d.stints) {
+      const x0 = lapX(st.startLap, w), x1 = lapX(st.endLap + 1, w);
+      add(svg, "rect", { x: x0, y, width: Math.max(2, x1 - x0), height: rowH,
+        rx: 3, fill: compoundColor(st.compound), opacity: 0.92 });
+    }
+    // pit-stop diamonds sit on the row boundary at the pit lap
+    for (const pl of d.pits) {
+      const px = lapX(pl + 1, w), cy = y + rowH / 2;
+      add(svg, "path", { d: `M${px} ${cy-5} L${px+5} ${cy} L${px} ${cy+5} L${px-5} ${cy} Z`,
+        fill: "#0a0a0f", stroke: "#fff", "stroke-width": 1.2 });
+    }
+  });
+  // lap axis at the bottom
+  drawLapAxis(svg, w, PAD_T + rows.length * (rowH + gap));
+}
+
+// ----- 3. RACE CONTROL strip (SVG) --------------------------------------
+function drawEvents() {
+  const svg = $("events");
+  const w = svg.parentElement.clientWidth;
+  // Markers sit on a central baseline; labels stack in lanes ABOVE it. We pick
+  // a lane per label greedily (first lane whose last label doesn't overlap in
+  // x), so dense clusters fan upward instead of colliding — far more legible
+  // than a 2-level up/down flip for a chaotic race like Brazil '24.
+  const baseY = 18, laneH = 14, labelHalf = 34; // ~half a label's px width
+  const laneLastX = []; // running rightmost x used per lane
+  const placed = data.events.map(ev => {
+    const x = lapX(ev.lap, w);
+    let lane = 0;
+    while (lane < laneLastX.length && x - labelHalf < laneLastX[lane]) lane++;
+    laneLastX[lane] = x + labelHalf;
+    return { ev, x, lane };
+  });
+  const nLanes = Math.max(1, laneLastX.length);
+  const h = baseY + nLanes * laneH + 26;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("height", h);
+  svg.innerHTML = "";
+
+  // baseline track
+  add(svg, "line", { x1: PAD_L, y1: baseY, x2: w - PAD_R, y2: baseY,
+    stroke: "#2a2a3a", "stroke-width": 2 });
+
+  placed.forEach(({ ev, x, lane }) => {
+    const st = EVENT_STYLE[ev.type] || { color: "#888" };
+    const ly = baseY + (lane + 1) * laneH + 4;
+    // leader line from baseline marker up to its label lane
+    add(svg, "line", { x1: x, y1: baseY, x2: x, y2: ly - 9,
+      stroke: st.color, "stroke-width": 1, opacity: 0.4 });
+    add(svg, "line", { x1: x, y1: baseY - 6, x2: x, y2: baseY + 6,
+      stroke: st.color, "stroke-width": 3 });
+    add(svg, "circle", { cx: x, cy: baseY, r: 3.5, fill: st.color });
+    add(svg, "text", { x, y: ly, "text-anchor": "middle", fill: st.color,
+      "font-size": 10, "font-weight": 600 }, ev.label);
+  });
+  drawLapAxis(svg, w, h - 14);
+}
+
+// shared lap axis tick labels for the SVG charts
+function drawLapAxis(svg, w, y) {
+  const step = data.total_laps > 40 ? 10 : 5;
+  for (let l = 1; l <= data.total_laps; l += step) {
+    add(svg, "text", { x: lapX(l, w), y: y + 14, "text-anchor": "middle",
+      fill: "#5a5a6a", "font-size": 9 }, "L" + l);
+  }
+}
+
+// tiny SVG element helper
+function add(parent, tag, attrs, text) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  if (text != null) el.textContent = text;
+  parent.appendChild(el);
+  return el;
+}
+
+// ----- 4. TEAM RADIO -----------------------------------------------------
+let radioClips = [];                 // [{utc, code, url, t, lap}]
+const radioTranscripts = {};         // url -> text cache (reuses /api/transcribe)
+
+// Radio clips carry no colour; reuse the team colours already in the position data.
+function driverColor(code) {
+  const d = (data.positions || []).find(x => x.driver === code);
+  return d ? d.color : "#888";
+}
+
+async function fetchRadio(q) {
+  radioClips = [];
+  try {
+    const r = await fetch("/api/radio-timed?" + q);
+    const d = await r.json();
+    if (d.clips) radioClips = d.clips;
+  } catch (_) { /* no radio for this session — section stays empty */ }
+  const onLap = radioClips.filter(c => c.lap != null).length;
+  $("radiotitle").textContent = radioClips.length
+    ? `Team radio · ${radioClips.length} clips (${onLap} on laps, ${radioClips.length - onLap} off-lap)`
+    : "Team radio · none published";
+  drawRadio(); buildRadioPre();
+}
+
+// Clips that map to a racing lap: markers on the shared lap axis, fanned into
+// lanes (same greedy approach as race control) so dense clusters stay legible.
+function drawRadio() {
+  const svg = $("radiostrip");
+  const w = svg.parentElement.clientWidth;
+  const onLap = radioClips.filter(c => c.lap != null);
+  if (!onLap.length) { svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
+
+  const baseY = 16, laneH = 14, labelHalf = 16;
+  const laneLastX = [];
+  const placed = onLap.map(c => {
+    const x = lapX(c.lap, w);
+    let lane = 0;
+    while (lane < laneLastX.length && x - labelHalf < laneLastX[lane]) lane++;
+    laneLastX[lane] = x + labelHalf;
+    return { c, x, lane };
+  });
+  const nLanes = Math.max(1, laneLastX.length);
+  const h = baseY + nLanes * laneH + 26;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("height", h);
+  svg.innerHTML = "";
+  add(svg, "line", { x1: PAD_L, y1: baseY, x2: w - PAD_R, y2: baseY,
+    stroke: "#2a2a3a", "stroke-width": 2 });
+
+  placed.forEach(({ c, x, lane }) => {
+    const col = driverColor(c.code);
+    const ly = baseY + (lane + 1) * laneH + 4;
+    add(svg, "line", { x1: x, y1: baseY, x2: x, y2: ly - 9, stroke: col, "stroke-width": 1, opacity: 0.4 });
+    add(svg, "circle", { cx: x, cy: baseY, r: 3.5, fill: col })
+      .addEventListener("click", () => playRadioClip(c));
+    add(svg, "text", { x, y: ly, "text-anchor": "middle", fill: col, "font-size": 10, "font-weight": 600 },
+      c.code).addEventListener("click", () => playRadioClip(c));
+  });
+  drawLapAxis(svg, w, h - 14);
+}
+
+// Off-lap clips (formation lap, red-flag stoppage, cool-down) have no lap to
+// pin to — surface them as a clickable chip row so ~a third of the radio
+// doesn't silently vanish from this view.
+function buildRadioPre() {
+  const el = $("radioPre"); el.innerHTML = "";
+  const off = radioClips.filter(c => c.lap == null);
+  if (!off.length) return;
+  const head = document.createElement("div");
+  head.style.cssText = "width:100%;color:var(--muted);font-size:11px;margin-bottom:2px;";
+  head.textContent = "Off-lap (formation · stoppage · cool-down):";
+  el.appendChild(head);
+  for (const c of off) {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    chip.innerHTML = `<b style="color:${driverColor(c.code)}">${c.code}</b>` +
+      `<span class="when">${fmtClock(c.t)}</span> ▶`;
+    chip.addEventListener("click", () => playRadioClip(c));
+    el.appendChild(chip);
+  }
+}
+
+function fmtClock(sec) {
+  sec = Math.max(0, sec); const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+
+function playRadioClip(c) {
+  const a = $("r_audio");
+  a.src = c.url; a.play().catch(() => {});
+  $("rn_chip").textContent = c.code;
+  $("rn_chip").style.background = driverColor(c.code);
+  $("radioNow").classList.add("show");
+  const t = $("rn_txt");
+  if (radioTranscripts[c.url]) { t.textContent = radioTranscripts[c.url]; t.classList.remove("pending"); }
+  else {
+    t.textContent = "transcribing…"; t.classList.add("pending");
+    fetch("/api/transcribe", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: c.url }) })
+      .then(r => r.json())
+      .then(d => { radioTranscripts[c.url] = d.text || "(no speech detected)";
+        // only update if this clip is still the one showing
+        if ($("rn_chip").textContent === c.code) {
+          $("rn_txt").textContent = radioTranscripts[c.url]; $("rn_txt").classList.remove("pending"); }
+      })
+      .catch(() => { $("rn_txt").textContent = "(transcript unavailable)"; });
+  }
+}
+</script>
+</body>
+</html>

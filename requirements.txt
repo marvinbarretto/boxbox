@@ -1,0 +1,14 @@
+# Runtime dependencies. Create a venv and install:
+#   python -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Then run:  .venv/bin/python app.py   ->  http://127.0.0.1:5050
+#
+# faster-whisper downloads its model on first transcription.
+# radio-AI also needs OPENROUTER_API_KEY in a .env file (see README).
+
+fastf1==3.8.3            # F1 timing/telemetry/laps + circuit info
+flask==3.1.3             # web server
+faster-whisper==1.2.1    # local team-radio transcription
+python-dotenv==1.2.2     # loads OPENROUTER_API_KEY from .env
+
+# Dev-only (visual verification of pages); not needed to run the app:
+# playwright==1.60.0

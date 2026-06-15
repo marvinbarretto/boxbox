@@ -1,0 +1,20 @@
+# Secrets — never commit
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Generated data caches (rebuilt on demand from FastF1 / the timing feed)
+playback_cache/
+telemetry_cache/
+racestory_cache/
+overtakes_cache/
+ghost_cache/
+radio_ai_cache/
+radio_timed_cache/
+radio_clips/
+
+# Verification artifacts
+*.png

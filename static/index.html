@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>F1 Team Radio</title>
+<style>
+  :root {
+    --bg: #0a0a0f; --panel: #15151f; --line: #2a2a3a;
+    --red: #e10600; --text: #f2f2f7; --muted: #8a8a9a; --accent: #00d2be;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 22px 28px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px;
+  }
+  header .bar { width: 6px; height: 30px; background: var(--red); border-radius: 2px; }
+  header h1 { font-size: 19px; margin: 0; letter-spacing: .5px; }
+  header span { color: var(--muted); font-size: 13px; }
+  main { max-width: 860px; margin: 0 auto; padding: 26px 20px 60px; }
+
+  form {
+    display: grid; grid-template-columns: repeat(5, 1fr) auto; gap: 12px;
+    align-items: end; background: var(--panel); border: 1px solid var(--line);
+    padding: 18px; border-radius: 12px;
+  }
+  label { display: block; font-size: 11px; text-transform: uppercase;
+          letter-spacing: .6px; color: var(--muted); margin-bottom: 6px; }
+  input, select {
+    width: 100%; background: #0d0d14; border: 1px solid var(--line); color: var(--text);
+    padding: 9px 10px; border-radius: 8px; font-size: 14px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--red); color: #fff; border: 0; padding: 10px 18px;
+    border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+
+  #status { color: var(--muted); margin: 18px 2px; min-height: 20px; font-size: 14px; }
+  #toolbar { display: none; gap: 10px; margin: 6px 2px 14px; align-items: center; }
+  #toolbar.show { display: flex; }
+  #toolbar .count { color: var(--muted); font-size: 13px; margin-right: auto; }
+
+  .clip {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 12px;
+  }
+  .clip .top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .badge {
+    background: var(--red); color: #fff; font-weight: 700; font-size: 13px;
+    padding: 3px 9px; border-radius: 6px; letter-spacing: .5px;
+  }
+  .time { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .clip .top button { margin-left: auto; font-size: 13px; padding: 7px 14px; }
+  audio { width: 100%; height: 34px; margin-top: 4px; }
+  .transcript {
+    margin-top: 12px; padding: 11px 13px; background: #0d0d14;
+    border-left: 3px solid var(--accent); border-radius: 6px; color: #d8d8e2;
+  }
+  .transcript.pending { color: var(--muted); font-style: italic; border-left-color: var(--muted); }
+  @media (max-width: 720px) { form { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar"></div>
+  <h1>F1 TEAM RADIO</h1>
+  <span>FastF1 + raw timing feed + local Whisper</span>
+  <nav style="margin-left:auto;display:flex;gap:16px;flex-wrap:wrap;">
+    <a href="/track" style="color:var(--accent);text-decoration:none;font-size:13px;">track playback →</a>
+    <a href="/telemetry" style="color:var(--accent);text-decoration:none;font-size:13px;">telemetry →</a>
+    <a href="/racestory" style="color:var(--accent);text-decoration:none;font-size:13px;">race story →</a>
+    <a href="/ghost" style="color:var(--accent);text-decoration:none;font-size:13px;">ghost duel →</a>
+    <a href="/overtakes" style="color:var(--accent);text-decoration:none;font-size:13px;">overtakes →</a>
+    <a href="/radio-ai" style="color:var(--accent);text-decoration:none;font-size:13px;">radio AI →</a>
+  </nav>
+</header>
+
+<main>
+  <form id="f">
+    <div><label>Year</label><input id="year" type="number" value="2024" /></div>
+    <div><label>Event</label><input id="event" value="Monaco" /></div>
+    <div><label>Session</label>
+      <select id="session">
+        <option>R</option><option>Q</option><option>Sprint</option>
+        <option>FP1</option><option>FP2</option><option>FP3</option>
+      </select>
+    </div>
+    <div><label>Driver (opt)</label><input id="driver" placeholder="VER" /></div>
+    <div><label>Whisper model</label>
+      <select id="model"><option>base.en</option><option>small.en</option><option>tiny.en</option></select>
+    </div>
+    <button type="submit" id="load">Load clips</button>
+  </form>
+
+  <div id="status"></div>
+  <div id="toolbar">
+    <span class="count" id="count"></span>
+    <button class="ghost" id="transcribeAll">Transcribe all</button>
+  </div>
+  <div id="list"></div>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const list = $("list"), status = $("status"), toolbar = $("toolbar");
+
+  $("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    list.innerHTML = ""; toolbar.classList.remove("show");
+    $("load").disabled = true;
+    status.textContent = "Loading session (first load of a race downloads + caches it)…";
+
+    const q = new URLSearchParams({
+      year: $("year").value, event: $("event").value,
+      session: $("session").value, driver: $("driver").value.trim(),
+    });
+    try {
+      const res = await fetch("/api/clips?" + q);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      if (!data.clips.length) { status.textContent = "No radio clips found for that session (F1 may not have published any)."; return; }
+      status.textContent = "";
+      $("count").textContent = data.clips.length + " clips";
+      toolbar.classList.add("show");
+      data.clips.forEach(renderClip);
+    } catch (err) {
+      status.textContent = "Error: " + err.message;
+    } finally {
+      $("load").disabled = false;
+    }
+  });
+
+  function renderClip(c) {
+    const el = document.createElement("div");
+    el.className = "clip";
+    const time = c.utc ? new Date(c.utc).toLocaleTimeString() : "";
+    el.innerHTML = `
+      <div class="top">
+        <span class="badge">${c.code}</span>
+        <span class="time">${time}</span>
+        <button class="ghost">Transcribe</button>
+      </div>
+      <audio controls preload="none" src="${c.url}"></audio>`;
+    const btn = el.querySelector("button");
+    btn.addEventListener("click", () => transcribe(c.url, el, btn));
+    list.appendChild(el);
+  }
+
+  async function transcribe(url, el, btn) {
+    if (el.querySelector(".transcript")) return;          // already done
+    btn.disabled = true;
+    const t = document.createElement("div");
+    t.className = "transcript pending";
+    t.textContent = "Transcribing…";
+    el.appendChild(t);
+    try {
+      const res = await fetch("/api/transcribe", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, model: $("model").value }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      t.className = "transcript";
+      t.textContent = data.text || "(no speech detected)";
+    } catch (err) {
+      t.textContent = "Error: " + err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Transcribe sequentially — one CPU Whisper model, parallel would just thrash.
+  $("transcribeAll").addEventListener("click", async () => {
+    for (const el of list.querySelectorAll(".clip")) {
+      const btn = el.querySelector("button");
+      if (!el.querySelector(".transcript")) await transcribe(el.querySelector("audio").src, el, btn);
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>F1 Track Playback</title>
+<style>
+  :root {
+    --bg:#0a0a0f; --panel:#15151f; --line:#2a2a3a; --red:#e10600;
+    --text:#f2f2f7; --muted:#8a8a9a; --accent:#00d2be;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { padding:18px 28px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:14px; }
+  header .bar { width:6px; height:28px; background:var(--red); border-radius:2px; }
+  header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  header a { margin-left:auto; color:var(--muted); text-decoration:none; font-size:13px; }
+  header a:hover { color:var(--text); }
+  /* Wider than the other pages: the radio log sits beside the map. */
+  main { max-width:1240px; margin:0 auto; padding:20px; }
+
+  form { display:flex; gap:12px; align-items:end; flex-wrap:wrap;
+         background:var(--panel); border:1px solid var(--line); padding:14px; border-radius:12px; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.6px;
+          color:var(--muted); margin-bottom:5px; }
+  input, select { background:#0d0d14; border:1px solid var(--line); color:var(--text);
+                  padding:8px 10px; border-radius:8px; font-size:14px; }
+  input#event { width:140px; } input#year { width:80px; }
+  button { background:var(--red); color:#fff; border:0; padding:9px 18px; border-radius:8px;
+           font-weight:600; cursor:pointer; font-size:14px; }
+  button:disabled { opacity:.5; cursor:default; }
+
+  #status { color:var(--muted); margin:16px 2px; min-height:20px; font-size:14px; }
+  #stage { display:none; }
+  #stage.show { display:block; }
+
+  /* Two-column: map+controls on the left, radio log on the right. */
+  .stage-grid { display:flex; gap:14px; align-items:flex-start; }
+  .left { flex:1; min-width:0; }
+  .canvas-wrap { background:#08080d; border:1px solid var(--line); border-radius:12px;
+                 position:relative; }
+  canvas { width:100%; display:block; border-radius:12px; }
+  .clock { position:absolute; top:14px; left:18px; font-variant-numeric:tabular-nums;
+           font-size:22px; font-weight:700; letter-spacing:1px; pointer-events:none; }
+  .clock small { display:block; font-size:11px; font-weight:400; color:var(--muted); letter-spacing:.5px; }
+
+  /* Radio toast: appears over the map when a clip fires. */
+  .toast { position:absolute; top:14px; right:14px; width:340px; max-width:60%;
+           background:rgba(11,11,16,.96); border:1px solid var(--line);
+           border-left:3px solid var(--accent); border-radius:10px; padding:12px 14px;
+           display:none; }
+  .toast.show { display:block; }
+  .toast .head { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+  .toast .chip { font-weight:700; font-size:12px; padding:2px 7px; border-radius:5px; color:#fff; }
+  .toast .when { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+  .toast .x { margin-left:auto; cursor:pointer; color:var(--muted); font-size:16px; }
+  .toast .x:hover { color:var(--text); }
+  .toast .txt { font-size:13.5px; color:#dcdce6; min-height:20px; }
+  .toast .txt.pending { color:var(--muted); font-style:italic; }
+
+  .controls { display:flex; align-items:center; gap:14px; margin-top:14px;
+              background:var(--panel); border:1px solid var(--line); padding:12px 16px; border-radius:12px; }
+  .controls button.play { width:44px; height:44px; border-radius:50%; font-size:16px; padding:0; }
+  .scrubwrap { position:relative; flex:1; display:flex; align-items:center; }
+  #scrub { width:100%; accent-color:var(--red); }
+  /* Radio markers sit just above the scrub track. */
+  .markers { position:absolute; left:0; right:0; top:-2px; height:10px; pointer-events:none; }
+  .marker { position:absolute; top:0; width:3px; height:10px; border-radius:1px;
+            transform:translateX(-50%); pointer-events:auto; cursor:pointer; opacity:.85; }
+  .marker:hover { opacity:1; height:13px; top:-2px; }
+  .controls select { padding:6px 8px; }
+  .controls .lbl { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .toggle { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted);
+            cursor:pointer; user-select:none; white-space:nowrap; }
+  .toggle input { width:15px; height:15px; accent-color:var(--accent); }
+
+  /* Radio log panel */
+  .radio-panel { width:300px; flex-shrink:0; background:var(--panel); border:1px solid var(--line);
+                 border-radius:12px; display:flex; flex-direction:column; max-height:660px; }
+  .radio-panel .rp-head { padding:12px 14px; border-bottom:1px solid var(--line);
+                          font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
+  .radio-log { overflow-y:auto; }
+  .clip-row { display:flex; align-items:center; gap:8px; padding:9px 12px;
+              border-bottom:1px solid var(--line); cursor:pointer; font-size:13px; }
+  .clip-row:hover { background:#1c1c28; }
+  .clip-row.active { background:#23232f; box-shadow:inset 3px 0 0 var(--accent); }
+  .clip-row.out { opacity:.5; }   /* pre-race / post-flag clips, outside the map window */
+  .clip-row .chip { font-weight:700; font-size:11px; padding:2px 6px; border-radius:5px; color:#fff; }
+  .clip-row .meta { margin-left:auto; text-align:right; color:var(--muted); font-size:11px;
+                    font-variant-numeric:tabular-nums; }
+  .clip-row .play-mini { font-size:12px; color:var(--accent); }
+
+  @media (max-width:880px) {
+    .stage-grid { flex-direction:column; }
+    .radio-panel { width:auto; max-height:340px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar"></div>
+  <h1>F1 TRACK PLAYBACK</h1>
+  <a href="/">← team radio</a>
+</header>
+
+<main>
+  <form id="f">
+    <div><label>Year</label><input id="year" type="number" value="2024" /></div>
+    <div><label>Event</label><input id="event" value="Brazil" /></div>
+    <div><label>Session</label>
+      <select id="session"><option>R</option><option>Q</option><option>Sprint</option></select>
+    </div>
+    <button type="submit" id="load">Load</button>
+  </form>
+  <div id="status">Tip: first load of a session downloads telemetry (~10–20s), then it's cached.</div>
+
+  <div id="stage">
+    <div class="stage-grid">
+      <div class="left">
+        <div class="canvas-wrap">
+          <canvas id="c"></canvas>
+          <div class="clock"><span id="clock">00:00</span><small id="evlabel"></small></div>
+          <div class="toast" id="toast">
+            <div class="head">
+              <span class="chip" id="t_chip">VER</span>
+              <span class="when" id="t_when"></span>
+              <span class="x" id="t_x" title="skip">✕</span>
+            </div>
+            <div class="txt pending" id="t_txt">…</div>
+            <audio id="t_audio"></audio>
+          </div>
+        </div>
+        <div class="controls">
+          <button class="play" id="play">▶</button>
+          <div class="scrubwrap">
+            <input type="range" id="scrub" min="0" max="100" value="0" />
+            <div class="markers" id="markers"></div>
+          </div>
+          <label class="toggle" title="Pause the animation when a radio message is sent, play it, then resume">
+            <input type="checkbox" id="autopause" checked /> 📻 auto-pause
+          </label>
+          <span class="lbl">speed</span>
+          <select id="speed">
+            <option value="5">5×</option>
+            <option value="10">10×</option>
+            <option value="20" selected>20×</option>
+            <option value="40">40×</option>
+            <option value="80">80×</option>
+          </select>
+        </div>
+      </div>
+
+      <aside class="radio-panel">
+        <div class="rp-head" id="rp_head">📻 Team Radio</div>
+        <div class="radio-log" id="radiolog"></div>
+      </aside>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const canvas = $("c"), ctx = canvas.getContext("2d");
+let data = null;        // {track, playback}
+let vt = 0;             // virtual session time (seconds)
+let playing = false;
+let lastTs = 0;
+let view = null;        // coord transform {scale, ox, oy}
+
+// --- radio state ---
+let clips = [];                 // [{utc, code, url, t, lap}] sorted by t
+let nextClip = 0;               // index of the next clip whose time we haven't passed
+const pulseUntil = {};          // code -> performance.now() deadline (WALL-CLOCK, speed-independent)
+const PULSE_MS = 1500;          // how long a car's ring pulses, in real time
+const transcripts = {};         // url -> text cache
+const audio = () => $("t_audio");
+let radioQueue = [];            // clips waiting to auto-play
+let radioActive = null;         // clip currently auto-playing
+let resumeAfterRadio = false;   // was the animation playing when radio interrupted?
+
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("load").disabled = true; playing = false; $("play").textContent = "▶";
+  $("status").textContent = "Loading… (first time downloads telemetry, please wait)";
+  const q = new URLSearchParams({ year:$("year").value, event:$("event").value, session:$("session").value });
+  try {
+    const res = await fetch("/api/playback?" + q);
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    data = d;
+    $("status").textContent = `${d.playback.frames} frames · ${Object.keys(d.playback.drivers).length} cars · ${d.cached ? "cached" : "freshly built"}`;
+    $("evlabel").textContent = `${$("event").value.toUpperCase()} ${$("year").value} · ${$("session").value}`;
+    setupView();
+    vt = d.playback.t0;
+    $("scrub").value = 0;
+    $("stage").classList.add("show");
+    resize(); draw();
+    loadRadio(q);              // fetch radio clips in parallel; failure is non-fatal
+  } catch (err) {
+    $("status").textContent = "Error: " + err.message;
+  } finally {
+    $("load").disabled = false;
+  }
+});
+
+// ---------- radio loading + UI ----------
+async function loadRadio(q) {
+  clips = []; nextClip = 0; radioQueue = []; radioActive = null;
+  $("radiolog").innerHTML = ""; $("markers").innerHTML = ""; hideToast();
+  try {
+    const r = await fetch("/api/radio-timed?" + q);
+    const d = await r.json();
+    if (d.error || !d.clips) return;
+    clips = d.clips;
+    const inWin = clips.filter(inWindow).length;
+    $("rp_head").textContent = `📻 Team Radio · ${clips.length} clips (${inWin} on map)`;
+    buildMarkers(); buildLog();
+    recomputeNextClip();
+  } catch (_) { /* no radio for this session — leave the panel empty */ }
+}
+
+function windowEnd() { const p = data.playback; return p.t0 + (p.frames - 1) * p.step; }
+function inWindow(c) { const p = data.playback; return c.t >= p.t0 && c.t <= windowEnd(); }
+function clipFrac(c) { const p = data.playback; return (c.t - p.t0) / (windowEnd() - p.t0); }
+function carColor(code) { return (data.playback.drivers[code]?.color) || "#888"; }
+
+function buildMarkers() {
+  const m = $("markers"); m.innerHTML = "";
+  for (const c of clips) {
+    if (!inWindow(c)) continue;            // only clips that have a place on the timeline
+    const el = document.createElement("div");
+    el.className = "marker";
+    el.style.left = (clipFrac(c) * 100) + "%";
+    el.style.background = carColor(c.code);
+    el.title = `${c.code} · ${fmt(c.t - data.playback.t0)}`;
+    el.addEventListener("click", () => jumpToClip(c));
+    m.appendChild(el);
+  }
+}
+
+function buildLog() {
+  const log = $("radiolog"); log.innerHTML = "";
+  for (const c of clips) {
+    const row = document.createElement("div");
+    row.className = "clip-row" + (inWindow(c) ? "" : " out");
+    row.dataset.url = c.url;
+    const lap = c.lap != null ? `L${c.lap}` : "—";
+    row.innerHTML =
+      `<span class="chip" style="background:${carColor(c.code)}">${c.code}</span>` +
+      `<span class="play-mini">▶</span>` +
+      `<span class="meta">${fmt(Math.max(0, c.t - data.playback.t0))}<br>${lap}</span>`;
+    row.addEventListener("click", () => jumpToClip(c));
+    log.appendChild(row);
+  }
+}
+
+function highlightRow(c) {
+  document.querySelectorAll(".clip-row.active").forEach(r => r.classList.remove("active"));
+  const row = [...document.querySelectorAll(".clip-row")].find(r => r.dataset.url === c.url);
+  if (row) { row.classList.add("active"); row.scrollIntoView({ block:"nearest" }); }
+}
+
+// Clicking a marker/row: seek the animation to that moment, then play the clip.
+function jumpToClip(c) {
+  if (inWindow(c)) { vt = c.t; recomputeNextClip(); draw(); }
+  pulseUntil[c.code] = performance.now() + PULSE_MS;
+  playRadio(c, /*manual=*/true);
+}
+
+// ---------- radio playback (auto-pause + queue) ----------
+function fireClip(c) {
+  pulseUntil[c.code] = performance.now() + PULSE_MS;   // always pulse the car
+  if ($("autopause").checked) playRadio(c, false);
+  else highlightRow(c);
+}
+
+function playRadio(c, manual) {
+  // Entering radio mode from running playback: remember to resume afterwards.
+  if (!radioActive && radioQueue.length === 0) resumeAfterRadio = playing;
+  playing = false; $("play").textContent = "▶";
+  // Genuinely simultaneous clips exist (two drivers at the same instant) — queue them
+  // so we never have two <audio> elements playing at once.
+  radioQueue.push(c);
+  if (!radioActive) pump();
+}
+
+function pump() {
+  radioActive = radioQueue.shift() || null;
+  if (!radioActive) { hideToast(); if (resumeAfterRadio) { playing = true; $("play").textContent = "❚❚"; } return; }
+  const c = radioActive;
+  highlightRow(c);
+  showToast(c);
+  const a = audio();
+  a.src = c.url; a.play().catch(() => {});
+  // Lazy-transcribe (reuses the Whisper endpoint); cache so re-plays are instant.
+  fillTranscript(c);
+}
+
+audio().addEventListener("ended", pump);   // chain to the next queued clip, or resume
+$("t_x").addEventListener("click", () => { audio().pause(); pump(); });
+
+function showToast(c) {
+  $("t_chip").textContent = c.code;
+  $("t_chip").style.background = carColor(c.code);
+  $("t_when").textContent = fmt(Math.max(0, c.t - data.playback.t0)) + (c.lap != null ? ` · L${c.lap}` : "");
+  const t = $("t_txt");
+  if (transcripts[c.url]) { t.textContent = transcripts[c.url]; t.classList.remove("pending"); }
+  else { t.textContent = "transcribing…"; t.classList.add("pending"); }
+  $("toast").classList.add("show");
+}
+function hideToast() { $("toast").classList.remove("show"); }
+
+async function fillTranscript(c) {
+  if (transcripts[c.url]) return;
+  try {
+    const r = await fetch("/api/transcribe", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ url: c.url }),
+    });
+    const d = await r.json();
+    transcripts[c.url] = d.text || "(no speech detected)";
+  } catch (_) { transcripts[c.url] = "(transcript unavailable)"; }
+  // Only update the toast if this clip is still the one showing.
+  if (radioActive && radioActive.url === c.url) {
+    $("t_txt").textContent = transcripts[c.url]; $("t_txt").classList.remove("pending");
+  }
+}
+
+// nextClip = first clip strictly after the current time (so seeking never retro-fires).
+function recomputeNextClip() {
+  nextClip = clips.findIndex(c => c.t > vt);
+  if (nextClip < 0) nextClip = clips.length;
+}
+
+// ---------- view + draw ----------
+function setupView() {
+  const [minx, miny, maxx, maxy] = data.track.bounds;
+  view = { minx, miny, maxx, maxy, w: maxx - minx, h: maxy - miny };
+}
+function resize() {
+  if (!data) return;
+  const wrap = canvas.parentElement;
+  const cssW = wrap.clientWidth;
+  const aspect = view.h / view.w;
+  const cssH = Math.min(cssW * aspect, 620);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+  canvas.style.height = cssH + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const pad = 30;
+  const scale = Math.min((cssW - 2*pad) / view.w, (cssH - 2*pad) / view.h);
+  view.scale = scale;
+  view.ox = (cssW - view.w * scale) / 2 - view.minx * scale;
+  view.oy = (cssH - view.h * scale) / 2 - view.miny * scale;
+}
+const tx = x => x * view.scale + view.ox;
+const ty = y => y * view.scale + view.oy;
+function lerp(a, b, f) { return a + (b - a) * f; }
+
+function carPos(d, i0, i1, frac) {
+  const x0 = d.x[i0], y0 = d.y[i0], x1 = d.x[i1], y1 = d.y[i1];
+  if (x0 == null && x1 == null) return null;
+  if (x0 == null) return [x1, y1];
+  if (x1 == null) return [x0, y0];
+  return [lerp(x0, x1, frac), lerp(y0, y1, frac)];
+}
+
+function draw() {
+  if (!data) return;
+  const p = data.playback;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // track
+  const line = data.track.line;
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.strokeStyle = "#2b2b3a"; ctx.lineWidth = 18;
+  ctx.beginPath(); ctx.moveTo(tx(line[0][0]), ty(line[0][1]));
+  for (const [x, y] of line) ctx.lineTo(tx(x), ty(y));
+  ctx.closePath(); ctx.stroke();
+  ctx.strokeStyle = "#0d0d14"; ctx.lineWidth = 12; ctx.stroke();
+
+  // current frame
+  const fFloat = (vt - p.t0) / p.step;
+  let i0 = Math.max(0, Math.min(p.frames - 1, Math.floor(fFloat)));
+  const i1 = Math.min(p.frames - 1, i0 + 1);
+  const frac = Math.max(0, Math.min(1, fFloat - i0));
+  const now = performance.now();
+
+  for (const [code, d] of Object.entries(p.drivers)) {
+    const pos = carPos(d, i0, i1, frac);
+    if (!pos) continue;
+    const cx = tx(pos[0]), cy = ty(pos[1]);
+    // Radio pulse ring — driven by WALL-CLOCK so it's visible at any playback speed.
+    const until = pulseUntil[code];
+    if (until && now < until) {
+      const prog = 1 - (until - now) / PULSE_MS;     // 0..1
+      ctx.beginPath(); ctx.arc(cx, cy, 7 + prog * 20, 0, 7);
+      ctx.strokeStyle = d.color; ctx.globalAlpha = 1 - prog; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.beginPath(); ctx.arc(cx, cy, 7, 0, 7);
+    ctx.fillStyle = d.color; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "#fff"; ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.font = "600 10px sans-serif";
+    ctx.fillText(code, cx + 10, cy + 3);
+  }
+
+  const elapsed = vt - p.t0;
+  $("clock").textContent = fmt(elapsed);
+  $("scrub").value = (fFloat / (p.frames - 1)) * 100;
+}
+
+function fmt(s) {
+  s = Math.max(0, s); const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return String(m).padStart(2,"0") + ":" + String(sec).padStart(2,"0");
+}
+
+function loop(ts) {
+  if (playing && data) {
+    if (!lastTs) lastTs = ts;
+    const dt = (ts - lastTs) / 1000; lastTs = ts;
+    vt += dt * (+$("speed").value);
+    const end = windowEnd();
+    if (vt >= end) { vt = end; playing = false; $("play").textContent = "▶"; }
+    // Fire every clip we just passed (could be several in one frame at high speed).
+    while (nextClip < clips.length && clips[nextClip].t <= vt) {
+      const c = clips[nextClip++];
+      if (inWindow(c)) fireClip(c);
+    }
+    draw();
+  } else {
+    lastTs = 0;
+    // Keep redrawing while paused so pulse rings still animate (wall-clock).
+    if (data) draw();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+$("play").addEventListener("click", () => {
+  playing = !playing; lastTs = 0;
+  $("play").textContent = playing ? "❚❚" : "▶";
+});
+$("scrub").addEventListener("input", () => {
+  if (!data) return;
+  const p = data.playback;
+  const fFloat = (+$("scrub").value / 100) * (p.frames - 1);
+  vt = p.t0 + fFloat * p.step;
+  recomputeNextClip();      // seeking must not retro-fire clips
+  draw();
+});
+window.addEventListener("resize", () => { resize(); draw(); buildMarkers(); });
+</script>
+</body>
+</html>

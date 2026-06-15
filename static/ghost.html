@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>F1 Ghost-Lap Duel</title>
+<style>
+  :root {
+    --bg:#0a0a0f; --panel:#15151f; --line:#2a2a3a; --red:#e10600;
+    --text:#f2f2f7; --muted:#8a8a9a; --accent:#00d2be;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { padding:18px 28px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:14px; }
+  header .bar { width:6px; height:28px; background:var(--red); border-radius:2px; }
+  header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  header nav { margin-left:auto; display:flex; gap:18px; }
+  header a { color:var(--muted); text-decoration:none; font-size:13px; }
+  header a:hover { color:var(--text); }
+  main { max-width:1000px; margin:0 auto; padding:20px; }
+
+  form { display:flex; gap:12px; align-items:end; flex-wrap:wrap;
+         background:var(--panel); border:1px solid var(--line); padding:14px; border-radius:12px; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.6px;
+          color:var(--muted); margin-bottom:5px; }
+  input, select { background:#0d0d14; border:1px solid var(--line); color:var(--text);
+                  padding:8px 10px; border-radius:8px; font-size:14px; }
+  input#event { width:140px; } input#year { width:80px; }
+  input#driver, input#driver2 { width:80px; text-transform:uppercase; }
+  button { background:var(--red); color:#fff; border:0; padding:9px 18px; border-radius:8px;
+           font-weight:600; cursor:pointer; font-size:14px; }
+  button:disabled { opacity:.5; cursor:default; }
+
+  #status { color:var(--muted); margin:16px 2px; min-height:20px; font-size:14px; }
+  #stage { display:none; }
+  #stage.show { display:block; }
+  .canvas-wrap { background:#08080d; border:1px solid var(--line); border-radius:12px;
+                 margin-top:14px; position:relative; }
+  canvas { width:100%; display:block; border-radius:12px; }
+
+  /* Live delta readout — the headline of this feature. Big, tabular, colour-coded
+     to whoever's ahead at the current instant. */
+  .delta { position:absolute; top:14px; left:18px; }
+  .delta .gap { font-variant-numeric:tabular-nums; font-size:30px; font-weight:800;
+                letter-spacing:.5px; line-height:1.1; }
+  .delta .sub { font-size:11px; color:var(--muted); letter-spacing:.5px; text-transform:uppercase; }
+  .clock { position:absolute; top:14px; right:18px; text-align:right;
+           font-variant-numeric:tabular-nums; font-size:20px; font-weight:700; }
+  .clock small { display:block; font-size:11px; font-weight:400; color:var(--muted); letter-spacing:.5px; }
+
+  /* Driver legend chips, coloured by team. */
+  .legend { display:flex; gap:16px; margin-top:12px; padding:0 2px; }
+  .legend .chip { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600;
+                  font-variant-numeric:tabular-nums; }
+  .legend .dot { width:12px; height:12px; border-radius:50%; box-shadow:0 0 0 1.5px #fff; }
+  .legend .lt { color:var(--muted); font-weight:400; }
+
+  .controls { display:flex; align-items:center; gap:14px; margin-top:14px;
+              background:var(--panel); border:1px solid var(--line); padding:12px 16px; border-radius:12px; }
+  .controls button.play { width:44px; height:44px; border-radius:50%; font-size:16px; padding:0; }
+  #scrub { flex:1; accent-color:var(--red); }
+  .controls select { padding:6px 8px; }
+  .controls .lbl { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar"></div>
+  <h1>F1 GHOST-LAP DUEL</h1>
+  <nav>
+    <a href="/">← team radio</a>
+    <a href="/track">track playback</a>
+  </nav>
+</header>
+
+<main>
+  <form id="f">
+    <div><label>Year</label><input id="year" type="number" value="2024" /></div>
+    <div><label>Event</label><input id="event" value="Brazil" /></div>
+    <div><label>Session</label>
+      <select id="session"><option>Q</option><option>R</option><option>Sprint</option></select>
+    </div>
+    <div><label>Driver 1</label><input id="driver" value="VER" /></div>
+    <div><label>Driver 2</label><input id="driver2" value="NOR" /></div>
+    <button type="submit" id="load">Duel</button>
+  </form>
+  <div id="status">Two fastest laps, both launched from the line at t=0. Watch the gap open. First load of a session downloads telemetry (~10–20s), then it's cached.</div>
+
+  <div id="stage">
+    <div class="canvas-wrap">
+      <canvas id="c"></canvas>
+      <div class="delta">
+        <div class="gap" id="gap">—</div>
+        <div class="sub" id="gapsub">live delta</div>
+      </div>
+      <div class="clock"><span id="clock">0.0s</span><small id="evlabel"></small></div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="controls">
+      <button class="play" id="play">▶</button>
+      <input type="range" id="scrub" min="0" max="100" value="0" />
+      <span class="lbl">speed</span>
+      <select id="speed">
+        <option value="1">1×</option>
+        <option value="2" selected>2×</option>
+        <option value="4">4×</option>
+        <option value="8">8×</option>
+      </select>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const canvas = $("c"), ctx = canvas.getContext("2d");
+let data = null;        // full /api/ghost payload
+let vt = 0;             // virtual LAP-RELATIVE time (seconds from the line)
+let playing = false;
+let lastTs = 0;
+let view = null;        // coord transform {scale, ox, oy}
+// short fading trail of recent canvas positions, per driver index, for style.
+let trails = [[], []];
+const TRAIL_LEN = 16;
+
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("load").disabled = true; playing = false; $("play").textContent = "▶";
+  $("status").textContent = "Loading… (first time downloads telemetry, please wait)";
+  const q = new URLSearchParams({
+    year:$("year").value, event:$("event").value, session:$("session").value,
+    driver:$("driver").value, driver2:$("driver2").value
+  });
+  try {
+    const res = await fetch("/api/ghost?" + q);
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    data = d;
+    const codes = d.drivers.map(x => x.code).join(" vs ");
+    $("status").textContent = `${codes} · ${d.frames} frames · ${d.cached ? "cached" : "freshly built"}`;
+    $("evlabel").textContent = `${$("event").value.toUpperCase()} ${$("year").value} · ${$("session").value}`;
+    buildLegend();
+    setupView();
+    vt = 0;
+    trails = [[], []];
+    $("scrub").value = 0;
+    $("stage").classList.add("show");
+    resize(); draw();
+  } catch (err) {
+    $("status").textContent = "Error: " + err.message;
+  } finally {
+    $("load").disabled = false;
+  }
+});
+
+function buildLegend() {
+  $("legend").innerHTML = data.drivers.map(d =>
+    `<span class="chip"><span class="dot" style="background:${d.color}"></span>${d.code}
+       <span class="lt">${d.laptime.toFixed(3)}s</span></span>`
+  ).join("");
+}
+
+// Map data-space bounds -> canvas with padding, preserving aspect ratio.
+function setupView() {
+  const [minx, miny, maxx, maxy] = data.track.bounds;
+  view = { minx, miny, maxx, maxy, w: maxx - minx, h: maxy - miny };
+}
+function resize() {
+  if (!data) return;
+  const wrap = canvas.parentElement;
+  const cssW = wrap.clientWidth;
+  const aspect = view.h / view.w;
+  const cssH = Math.min(cssW * aspect, 620);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+  canvas.style.height = cssH + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const pad = 30;
+  const scale = Math.min((cssW - 2*pad) / view.w, (cssH - 2*pad) / view.h);
+  view.scale = scale;
+  view.ox = (cssW - view.w * scale) / 2 - view.minx * scale;
+  view.oy = (cssH - view.h * scale) / 2 - view.miny * scale;
+}
+const TX = x => x * view.scale + view.ox;
+const TY = y => y * view.scale + view.oy;
+
+function lerp(a, b, f) { return a + (b - a) * f; }
+
+// interpolate one driver's data-space position at frame index pair / frac.
+function carPos(d, i0, i1, frac) {
+  const x0 = d.x[i0], y0 = d.y[i0], x1 = d.x[i1], y1 = d.y[i1];
+  if (x0 == null && x1 == null) return null;
+  if (x0 == null) return [x1, y1];
+  if (x1 == null) return [x0, y0];
+  return [lerp(x0, x1, frac), lerp(y0, y1, frac)];
+}
+function carDist(d, i0, i1, frac) {
+  const a = d.dist[i0], b = d.dist[i1];
+  if (a == null && b == null) return null;
+  if (a == null) return b;
+  if (b == null) return a;
+  return lerp(a, b, frac);
+}
+
+// Read the delta-vs-distance array at distance `dist` (linear interp).
+// Convention from ghost.py: gap[k] = t(d2) - t(d1); positive => d2 behind d1.
+function deltaAtDist(dist) {
+  const D = data.delta.dist, G = data.delta.gap;
+  if (dist == null || !D.length) return null;
+  if (dist <= D[0]) return G[0];
+  if (dist >= D[D.length - 1]) return G[G.length - 1];
+  // binary search for the bracketing sample
+  let lo = 0, hi = D.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (D[m] <= dist) lo = m; else hi = m; }
+  const f = (dist - D[lo]) / (D[hi] - D[lo]);
+  return lerp(G[lo], G[hi], f);
+}
+
+function draw() {
+  if (!data) return;
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // track outline (same double-stroke road look as track.html)
+  const line = data.track.line;
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.strokeStyle = "#2b2b3a"; ctx.lineWidth = 18;
+  ctx.beginPath(); ctx.moveTo(TX(line[0][0]), TY(line[0][1]));
+  for (const [x, y] of line) ctx.lineTo(TX(x), TY(y));
+  ctx.closePath(); ctx.stroke();
+  ctx.strokeStyle = "#0d0d14"; ctx.lineWidth = 12; ctx.stroke();
+
+  // frame index pair + fraction along the lap-relative grid
+  const fFloat = vt / data.step;
+  let i0 = Math.floor(fFloat);
+  i0 = Math.max(0, Math.min(data.frames - 1, i0));
+  const i1 = Math.min(data.frames - 1, i0 + 1);
+  const frac = Math.max(0, Math.min(1, fFloat - i0));
+
+  // leaderDist tracks the furthest-along car so we read the gap at the leader's
+  // position (matches the broadcast ghost overlay).
+  let leaderDist = null, anyMoving = false;
+
+  data.drivers.forEach((d, idx) => {
+    const pos = carPos(d, i0, i1, frac);
+    const dist = carDist(d, i0, i1, frac);
+    if (dist != null && (leaderDist == null || dist > leaderDist)) leaderDist = dist;
+    if (!pos) return;
+    const cx = TX(pos[0]), cy = TY(pos[1]);
+    anyMoving = true;
+
+    // push to trail; only keep a short window
+    const tr = trails[idx];
+    tr.push([cx, cy]);
+    if (tr.length > TRAIL_LEN) tr.shift();
+    // fading trail
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (let k = 1; k < tr.length; k++) {
+      const a = k / tr.length;            // older = fainter
+      ctx.globalAlpha = a * 0.6;
+      ctx.strokeStyle = d.color; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(tr[k-1][0], tr[k-1][1]); ctx.lineTo(tr[k][0], tr[k][1]); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // ghost dot
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+    ctx.fillStyle = d.color; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.font = "700 11px sans-serif";
+    ctx.fillText(d.code, cx + 11, cy + 4);
+  });
+
+  // live delta readout at the leader's current distance
+  const gap = deltaAtDist(leaderDist);
+  if (gap == null || !anyMoving) {
+    $("gap").textContent = "—"; $("gap").style.color = "var(--text)";
+    $("gapsub").textContent = "live delta";
+  } else {
+    // gap = t(d2) - t(d1). >0 => d2 behind => d1 leads. <0 => d2 leads.
+    const d1 = data.d1, d2 = data.d2;
+    const leader = gap > 0 ? d1 : (gap < 0 ? d2 : null);
+    const mag = Math.abs(gap);
+    const c1 = data.drivers[0].color, c2 = data.drivers[1].color;
+    if (leader == null) {
+      $("gap").textContent = "DEAD HEAT"; $("gap").style.color = "var(--text)";
+      $("gapsub").textContent = "0.000s";
+    } else {
+      // show "<behind driver> +X.XXXs", coloured to the leader (broadcast style)
+      const behind = gap > 0 ? d2 : d1;
+      $("gap").textContent = `${behind} +${mag.toFixed(3)}s`;
+      $("gap").style.color = leader === d1 ? c1 : c2;
+      $("gapsub").textContent = `${leader} ahead`;
+    }
+  }
+
+  // clock + scrub
+  $("clock").textContent = vt.toFixed(1) + "s";
+  $("scrub").value = (fFloat / (data.frames - 1)) * 100;
+}
+
+function loop(ts) {
+  if (playing && data) {
+    if (!lastTs) lastTs = ts;
+    const dt = (ts - lastTs) / 1000; lastTs = ts;
+    const speed = +$("speed").value;
+    vt += dt * speed;                     // advance lap-relative time
+    const end = (data.frames - 1) * data.step;
+    if (vt >= end) { vt = end; playing = false; $("play").textContent = "▶"; }
+    draw();
+  } else { lastTs = 0; }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+$("play").addEventListener("click", () => {
+  if (!data) return;
+  // restart from the line if we're parked at the end
+  const end = (data.frames - 1) * data.step;
+  if (!playing && vt >= end) { vt = 0; trails = [[], []]; }
+  playing = !playing; lastTs = 0;
+  $("play").textContent = playing ? "❚❚" : "▶";
+});
+$("scrub").addEventListener("input", () => {
+  if (!data) return;
+  const fFloat = (+$("scrub").value / 100) * (data.frames - 1);
+  vt = fFloat * data.step;
+  trails = [[], []];   // scrubbing breaks trail continuity; reset
+  draw();
+});
+window.addEventListener("resize", () => { resize(); draw(); });
+</script>
+</body>
+</html>
