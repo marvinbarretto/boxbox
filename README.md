@@ -25,6 +25,7 @@ cached under the `*_cache/` dirs and is instant thereafter.
 | `/racestory` | Position-by-lap "spaghetti" chart, tyre stints, race-control timeline, **+ a team-radio lane** |
 | `/ghost` | Two drivers' fastest laps raced as ghosts with a live time delta |
 | `/overtakes` | Detected on-track passes; click one to replay it on a mini track-map |
+| `/mini-sectors` | Track split into ~20 mini-sectors, coloured by fastest driver (or head-to-head speed delta) |
 | `/radio-ai` | Whisper transcripts + LLM cleanup/classification + a race "radio mood" |
 
 There's also a CLI: `team_radio.py` (list / download / transcribe radio clips).
@@ -47,6 +48,7 @@ telemetry.py      per-lap telemetry channels + speed-coloured track        -> /a
 racestory.py      positions/stints/pits/race-control                       -> /api/racestory
 ghost.py          two laps aligned on a lap-relative time grid + delta     -> /api/ghost
 overtakes.py      lap-resolution overtake detection                        -> /api/overtakes
+mini_sectors.py   mini-sector fastest-driver / head-to-head speed heatmap   -> /api/mini-sectors
 radio_ai.py       Whisper + OpenRouter cleanup/classification + mood        -> /api/radio-ai
 radio_timed.py    maps each clip's UTC -> SessionTime + lap                 -> /api/radio-timed
 static/*.html     one page per feature

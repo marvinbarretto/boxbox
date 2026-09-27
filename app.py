@@ -23,6 +23,7 @@ import radio_ai
 import ghost
 import overtakes
 import radio_timed
+import mini_sectors
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 # Don't pretty-print — the playback payload is megabytes; compact ~3x smaller.
@@ -35,6 +36,7 @@ app.register_blueprint(radio_ai.bp)      # LLM-cleaned & classified radio
 app.register_blueprint(ghost.bp)         # ghost-lap duel
 app.register_blueprint(overtakes.bp)     # overtake detector + reel
 app.register_blueprint(radio_timed.bp)   # radio clips placed on the session clock
+app.register_blueprint(mini_sectors.bp)  # fastest-driver / delta mini-sector heatmap
 
 
 @app.route("/")
@@ -70,6 +72,11 @@ def ghost_page():
 @app.route("/overtakes")
 def overtakes_page():
     return send_from_directory("static", "overtakes.html")
+
+
+@app.route("/mini-sectors")
+def mini_sectors_page():
+    return send_from_directory("static", "mini_sectors.html")
 
 
 @app.route("/api/playback")
